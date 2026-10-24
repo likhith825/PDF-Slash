@@ -27,7 +27,15 @@ App.register('sign', {
     ctx.ui.drawBox.hidden = !draw;
     ctx.ui.typeBox.hidden = draw;
   },
-  inkChanged(ctx) { ctx.ui.preview.style.color = App.cssColor(App.picked(ctx.el.opts, 'sig-ink')); },
+  inkChanged(ctx) {
+    const ink = App.cssColor(App.picked(ctx.el.opts, 'sig-ink')), pad = ctx.ui.pad, g = pad.getContext('2d');
+    ctx.ui.preview.style.color = ink;
+    // Recolor what is already drawn on the pad.
+    g.globalCompositeOperation = 'source-in';
+    g.fillStyle = ink;
+    g.fillRect(0, 0, pad.width, pad.height);
+    g.globalCompositeOperation = 'source-over';
+  },
 
   initPad(ctx) {
     const pad = ctx.ui.pad, g = pad.getContext('2d');
