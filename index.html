@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF Slash!</title>
+<link rel="icon" href="icon.ico">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <a class="logo" href="#/">PDF SLASH!</a>
+  <span class="tagline">Offline. Private. Unstoppable.</span>
+  <button class="head-btn" id="sound-btn" type="button" aria-pressed="true">Sound on</button>
+  <button class="head-btn" id="tips-btn" type="button" aria-pressed="true">Tips</button>
+</header>
+
+<main id="home">
+  <div class="filter" id="filter" hidden>
+    <span>Tools for <b id="filter-name"></b></span>
+    <button type="button" id="filter-clear">Show all tools</button>
+  </div>
+  <p class="hint" id="home-hint">Pick a tool, or drop a file anywhere on this page to see the tools that fit it.</p>
+  <nav class="grid" id="grid" aria-label="Tools"></nav>
+</main>
+
+<svg id="speed" viewBox="0 0 200 200" preserveAspectRatio="xMidYMid slice" aria-hidden="true" hidden><path d="M145 100L260 99L260 103ZM148 109L257 129L257 131ZM153 119L251 154L249 158ZM154 129L242 174L240 178ZM146 136L228 196L225 200ZM134 135L211 215L209 217ZM135 149L196 228L192 231ZM117 139L166 246L163 247ZM117 159L145 254L142 254ZM107 164L120 259L116 259ZM97 142L92 260L87 260ZM87 158L67 257L64 256ZM86 137L45 250L39 248ZM76 147L29 243L25 241ZM60 153L6 229L1 226ZM66 132L-15 212L-18 208ZM51 132L-33 189L-35 186ZM46 126L-44 170L-45 167ZM52 112L-55 141L-56 136ZM43 105L-59 117L-60 111ZM49 98L-60 99L-60 92ZM54 91L-57 72L-57 69ZM54 83L-51 47L-50 43ZM66 81L-42 26L-39 20ZM62 71L-28 4L-24 -1ZM65 63L-11 -15L-8 -18ZM71 59L4 -28L9 -32ZM73 38L35 -46L40 -48ZM84 38L57 -54L61 -55ZM93 54L72 -58L79 -59ZM101 57L100 -60L106 -60ZM107 60L128 -58L131 -57ZM121 42L152 -51L156 -50ZM130 46L176 -41L181 -38ZM125 70L199 -25L205 -21ZM135 65L213 -14L216 -10ZM133 78L232 10L236 15ZM140 82L246 34L247 36ZM141 88L252 51L254 57ZM165 91L258 76L259 82Z"/></svg>
+
+<main id="tool" hidden></main>
+
+<aside class="mascot" id="mascot">
+  <div class="bubble">
+    <p id="tip">Pick a tool, rookie! Everything stays on this PC.</p>
+    <button type="button" class="bubble-x" id="mascot-x" aria-label="Hide tips">&times;</button>
+  </div>
+  <!-- Original hero: spiky hair, red headband, big grin. -->
+  <svg class="hero" viewBox="0 0 100 112" aria-hidden="true">
+    <path d="M24 112 Q50 86 76 112Z" fill="#f77f00" stroke="#111" stroke-width="3"/>
+    <rect x="43" y="82" width="14" height="12" fill="#ffd9b0" stroke="#111" stroke-width="3"/>
+    <ellipse cx="50" cy="62" rx="27" ry="29" fill="#ffd9b0" stroke="#111" stroke-width="3"/>
+    <path d="M21 60 12 34 27 39 22 12 40 28 47 2 57 26 73 6 71 32 91 21 80 46 82 60 74 46 50 42 27 46Z" fill="#111"/>
+    <path d="M23 45h54v8H23z" fill="#e63946" stroke="#111" stroke-width="2.5"/>
+    <path d="M77 47 95 41 89 51 96 56 77 52Z" fill="#e63946" stroke="#111" stroke-width="2"/>
+    <path d="M30 57 46 61M70 57 54 61" stroke="#111" stroke-width="4" stroke-linecap="round"/>
+    <path d="M34 63 46 65 46 69 35 68ZM66 63 54 65 54 69 65 68Z" fill="#111"/>
+    <path d="M38 76Q50 87 62 76Z" fill="#fff" stroke="#111" stroke-width="2.5" stroke-linejoin="round"/>
+  </svg>
+</aside>
+
+<div class="burst" id="burst" aria-hidden="true">
+  <svg viewBox="0 0 100 100"><polygon points="100,50 83,57 92,67 78,69 85,85 69,78 67,92 57,83 50,100 43,83 33,92 31,78 15,85 22,69 8,67 17,57 0,50 17,43 8,33 22,31 15,15 31,22 33,8 43,17 50,0 57,17 67,8 69,22 85,15 78,31 92,33 83,43"/></svg>
+  <span id="burst-text">DONE!</span>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modal-msg">
+    <p id="modal-msg"></p>
+    <div class="modal-btns">
+      <button type="button" class="btn red" id="modal-yes">Yes, go</button>
+      <button type="button" class="btn" id="modal-no">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

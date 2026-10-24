@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Home page check</title>
+<style>body{font:15px/1.4 "Segoe UI",Arial,sans-serif;margin:16px}iframe{width:1366px;height:300px;border:2px solid #111}pre{background:#f4f4f4;padding:10px}</style>
+</head>
+<body>
+<!-- Test helper: loads the home page in a frame and lists every file it loaded.
+     Needs a browser started with --allow-file-access-from-files to read the frame from file://. -->
+<h1>Home page check</h1>
+<pre id="out">running…</pre>
+<iframe id="f" src="../index.html"></iframe>
+<script>
+document.getElementById('f').onload = function () {
+  const out = document.getElementById('out');
+  try {
+    const w = this.contentWindow;
+    const nav = w.performance.getEntriesByType('navigation')[0];
+    const files = [nav.name].concat(w.performance.getEntriesByType('resource').map(r => r.name));
+    out.textContent = JSON.stringify({
+      filesLoaded: files.map(u => decodeURIComponent(u).replace(/^.*anime-pdf\//, '')),
+      // file:// sub-files don't get timing entries, so also list every script and stylesheet tag on the page.
+      scriptTags: [...w.document.scripts].map(s => s.getAttribute('src')),
+      stylesheets: [...w.document.querySelectorAll('link[rel=stylesheet]')].map(l => l.getAttribute('href')),
+      anyNetworkUrl: files.some(u => /^https?:/.test(u)),
+      pdfLibLoaded: typeof w.PDFLib !== 'undefined',
+      pdfjsLoaded: typeof w.pdfjsLib !== 'undefined',
+      toolCards: w.document.querySelectorAll('#grid a.card').length,
+      domContentLoadedMs: Math.round(nav.domContentLoadedEventEnd),
+      loadMs: Math.round(nav.loadEventEnd)
+    }, null, 2);
+  } catch (e) {
+    out.textContent = 'Could not read the frame: ' + e.message;
+  }
+};
+</script>
+</body>
+</html>

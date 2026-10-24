@@ -1,0 +1,9 @@
+# Keep these byte-for-byte (no line-ending changes). A PDF with changed line endings is a broken PDF.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.dll binary
+*.exe binary
+# Third-party libraries stay exactly as published.
+vendor/** -text

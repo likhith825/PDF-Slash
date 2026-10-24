@@ -1,0 +1,14 @@
+# --- Personal / machine-specific: never publish ---
+# Windows shortcuts contain your PC name, user name and folder paths.
+*.lnk
+# The app is built on each PC by make-app.ps1 (or app/build.ps1); it's not stored in Git.
+app/PDF Slash.exe
+app/*.pdb
+# WebView2 data folders (settings, cache), in case one ever ends up here.
+*.WebView2/
+
+# --- Windows / editor clutter ---
+Thumbs.db
+desktop.ini
+*.log
+.vscode/

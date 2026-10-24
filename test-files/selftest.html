@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PDF Slash! self-test</title>
+<style>
+  body { font: 15px/1.4 "Segoe UI", Arial, sans-serif; margin: 16px; background: #fdf6e3; }
+  h1 { font-family: Impact, "Arial Black", sans-serif; letter-spacing: 1px; }
+  table { border-collapse: collapse; background: #fff; }
+  td, th { border: 2px solid #111; padding: 6px 8px; vertical-align: top; text-align: left; }
+  .pass { color: #0a7a2a; font-weight: 700; }
+  .fail { color: #b00012; font-weight: 700; }
+  canvas, img { max-height: 70px; outline: 1px solid #999; margin-right: 4px; }
+  #out { display: none; }
+</style>
+</head>
+<body>
+<!-- Double-click to run. Runs every tool's run() on the sample files, then re-opens each output
+     with pdf.js AND pdf-lib (or decodes each image) to check it is valid and correct. -->
+<h1>PDF Slash! self-test</h1>
+<p id="sum">Running…</p>
+<table><thead><tr><th>Tool</th><th>Test</th><th>Result</th><th>Details</th><th>Output</th></tr></thead><tbody id="rows"></tbody></table>
+<pre id="out"></pre>
+
+<script>window.APP_ROOT = '../';</script>
+<script src="../app.js"></script>
+<script src="samples.js"></script>
+<script src="../tools/merge.js"></script>
+<script src="../tools/split.js"></script>
+<script src="../tools/organize.js"></script>
+<script src="../tools/rotate.js"></script>
+<script src="../tools/img2pdf.js"></script>
+<script src="../tools/pdf2img.js"></script>
+<script src="../tools/compress.js"></script>
+<script src="../tools/pagenum.js"></script>
+<script src="../tools/watermark.js"></script>
+<script src="../tools/crop.js"></script>
+<script src="../tools/edit.js"></script>
+<script src="../tools/sign.js"></script>
+<script src="../tools/redact.js"></script>
+<script src="../tools/compare.js"></script>
+<script src="../tools/html2pdf.js"></script>
+<script>
+'use strict';
+const errors = [];
+window.addEventListener('error', e => errors.push(e.message));
+window.addEventListener('unhandledrejection', e => errors.push('unhandled: ' + (e.reason && e.reason.message)));
+
+function entry(name) {
+  const bin = atob(SAMPLES[name]), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { name, bytes, kind: name.endsWith('.pdf') ? 'pdf' : 'img', size: bytes.length, doc: null };
+}
+const noProgress = async () => {};
+const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// Opens an output PDF in both engines and reads size, rotation and the "PAGE n" label of every page.
+async function inspect(data) {
+  const u8 = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data;
+  const lib = await App.loadPdf(u8);           // pdf-lib must open it
+  const doc = await App.openPdfjs(u8);         // pdf.js must open it
+  const pages = [];
+  for (let n = 1; n <= doc.numPages; n++) {
+    const p = await doc.getPage(n);
+    const vp = p.getViewport({ scale: 1 }), items = (await p.getTextContent()).items;
+    const text = items.map(i => i.str).join(' ');
+    const m = text.match(/PAGE (\d+)/);
+    // where each text run starts, as a share of the page as displayed (0,0 = top left)
+    const spots = items.filter(i => i.str.trim()).map(i => {
+      const [x, y] = vp.convertToViewportPoint(i.transform[4], i.transform[5]);
+      return { str: i.str, fx: x / vp.width, fy: y / vp.height };
+    });
+    const ops = (await p.getOperatorList()).fnArray;
+    const image = ops.includes(pdfjsLib.OPS.paintImageXObject) || ops.includes(pdfjsLib.OPS.paintInlineImageXObject);
+    pages.push({ w: Math.round(vp.width), h: Math.round(vp.height), rot: p.rotate, label: m ? +m[1] : null, text, spots, image });
+    p.cleanup();
+  }
+  if (lib.getPageCount() !== doc.numPages) throw new Error('engines disagree on page count');
+  return { doc, pages, labels: pages.map(p => p.label), rots: pages.map(p => p.rot) };
+}
+async function imageSize(blob) {
+  const bmp = await createImageBitmap(blob);
+  const s = { w: bmp.width, h: bmp.height };
+  bmp.close();
+  return s;
+}
+
+const T = [
+  ['merge', 'sample-3 + sample-12 → 15 pages in order', ['sample-3.pdf', 'sample-12.pdf'], {}, async o => {
+    const r = await inspect(o.files[0].data);
+    return [o.files.length === 1 && eq(r.labels, [1, 2, 3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]) && r.pages[3].w === 612, `${r.pages.length} pages, labels ${r.labels.join(',')}`, r.doc];
+  }],
+  ['merge', 'keeps rotation and mixed sizes', ['rotated.pdf', 'mixed-sizes.pdf'], {}, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages.length === 7 && r.rots[1] === 90 && r.pages[5].w === 842 && r.pages[6].w === 400, `rotations ${r.rots}, widths ${r.pages.map(p => p.w)}`, r.doc];
+  }],
+  ['split', 'ranges "1-2, 3" → 2 files', ['sample-3.pdf'], { mode: 'ranges', ranges: [[1, 2], [3, 3]] }, async o => {
+    const a = await inspect(o.files[0].data), b = await inspect(o.files[1].data);
+    return [o.files.length === 2 && o.files[0].name === 'sample-3-pages-1-2.pdf' && o.files[1].name === 'sample-3-page-3.pdf' && eq(a.labels, [1, 2]) && eq(b.labels, [3]),
+      o.files.map(f => f.name).join(', '), a.doc];
+  }],
+  ['split', 'every page → 12 files (zip)', ['sample-12.pdf'], { mode: 'each' }, async o => {
+    const last = await inspect(o.files[11].data);
+    return [o.files.length === 12 && o.files[0].name === 'sample-12-page-01.pdf' && o.zip === 'sample-12-split.zip' && eq(last.labels, [12]),
+      `${o.files.length} files: ${o.files[0].name} … ${o.files[11].name}`, last.doc];
+  }],
+  ['split', 'pick pages 6, 2, 4 → one file in that order', ['sample-12.pdf'], { mode: 'pick', pages: [6, 2, 4] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [o.files.length === 1 && eq(r.labels, [6, 2, 4]), `labels ${r.labels}`, r.doc];
+  }],
+  ['rotate', 'all pages +90° on rotated.pdf', ['rotated.pdf'], { angle: 90, pages: null }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [eq(r.rots, [90, 180, 90]), `rotations ${r.rots}`, r.doc];
+  }],
+  ['rotate', 'only page 2 by 180°', ['sample-3.pdf'], { angle: 180, pages: [2] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [eq(r.rots, [0, 180, 0]), `rotations ${r.rots}`, r.doc];
+  }],
+  ['organize', 'reorder to 3,1 + turn page 1, delete page 2', ['sample-3.pdf'], { order: [{ i: 2, rot: 0 }, { i: 0, rot: 90 }] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [eq(r.labels, [3, 1]) && eq(r.rots, [0, 90]), `labels ${r.labels}, rotations ${r.rots}`, r.doc];
+  }],
+  ['img2pdf', 'JPG + PNG, page = image size', ['photo-wide.jpg', 'photo-tall.png'], { size: 'fit', margin: 0 }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [o.files[0].name === 'photo-wide-combined.pdf' && eq(r.pages.map(p => [p.w, p.h]), [[600, 375], [300, 450]]), `sizes ${r.pages.map(p => p.w + 'x' + p.h)}`, r.doc];
+  }],
+  ['img2pdf', 'A4 with margin, wide image turns sideways', ['photo-wide.jpg', 'photo-tall.png'], { size: 'a4', margin: 20 }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [eq(r.pages.map(p => [p.w, p.h]), [[842, 595], [595, 842]]), `sizes ${r.pages.map(p => p.w + 'x' + p.h)}`, r.doc];
+  }],
+  ['pdf2img', 'all pages → 3 JPGs at 1×', ['sample-3.pdf'], { type: 'jpg', quality: 0.85, scale: 1, pages: null }, async o => {
+    const s = await imageSize(o.files[0].data);
+    return [o.files.length === 3 && o.files[2].name === 'sample-3-page-3.jpg' && o.files[0].type === 'image/jpeg' && s.w === 595 && s.h === 842, `${o.files.length} files, ${s.w}x${s.h}`, o.files[0].data];
+  }],
+  ['pdf2img', 'page 2 as PNG at 1.5×', ['mixed-sizes.pdf'], { type: 'png', quality: 0.85, scale: 1.5, pages: [2] }, async o => {
+    const s = await imageSize(o.files[0].data);
+    return [o.files.length === 1 && o.files[0].name === 'mixed-sizes-page-2.png' && s.w === 918 && s.h === 1188, `${o.files[0].name} ${s.w}x${s.h}`, o.files[0].data];
+  }],
+  ['pdf2img', 'rotated page comes out sideways', ['rotated.pdf'], { type: 'jpg', quality: 0.8, scale: 1, pages: [2] }, async o => {
+    const s = await imageSize(o.files[0].data);
+    return [s.w === 842 && s.h === 595, `${s.w}x${s.h}`, o.files[0].data];
+  }],
+  ['compress', 'pages become JPEG pictures, same size', ['sample-3.pdf'], { quality: 0.6, scale: 1 }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages.length === 3 && r.pages.every(p => p.image && !p.text.trim() && p.w === 595 && p.h === 842) && /→/.test(o.message), o.message, r.doc];
+  }],
+  ['compress', 'rotated page is baked in upright', ['rotated.pdf'], { quality: 0.6, scale: 1 }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages[1].w === 842 && r.pages[1].h === 595 && r.pages[1].rot === 0, `page 2: ${r.pages[1].w}x${r.pages[1].h}, rotation ${r.pages[1].rot}`, r.doc];
+  }],
+  ['pagenum', '"Page 2 of 3" at bottom center', ['sample-3.pdf'], { pos: 'bc', format: 'of', start: 1, size: 12 }, async o => {
+    const r = await inspect(o.files[0].data), s = r.pages[1].spots.find(t => t.str === 'Page 2 of 3');
+    return [!!s && Math.abs(s.fx - 0.46) < 0.05 && s.fy > 0.95, s ? `found at x ${s.fx.toFixed(2)}, y ${s.fy.toFixed(2)}` : 'not found', r.doc];
+  }],
+  ['pagenum', 'upright at bottom right on a rotated page, start at 5', ['rotated.pdf'], { pos: 'br', format: 'n', start: 5, size: 12 }, async o => {
+    const r = await inspect(o.files[0].data), s = r.pages[1].spots.find(t => t.str === '6');
+    return [!!s && s.fx > 0.9 && s.fy > 0.92, s ? `"6" at x ${s.fx.toFixed(2)}, y ${s.fy.toFixed(2)} on the turned page` : 'not found', r.doc];
+  }],
+  ['watermark', 'text once in the center', ['sample-3.pdf'], { type: 'text', layout: 'center', opacity: 0.25, text: 'CONFIDENTIAL', size: 60, angle: 45, color: 'red' }, async o => {
+    const r = await inspect(o.files[0].data), hits = r.pages.map(p => p.spots.filter(t => t.str === 'CONFIDENTIAL').length);
+    return [hits.every(n => n === 1), `per page: ${hits}`, r.doc];
+  }],
+  ['watermark', 'text tiled all over', ['sample-3.pdf'], { type: 'text', layout: 'tile', opacity: 0.25, text: 'DRAFT', size: 40, angle: 45, color: 'gray' }, async o => {
+    const r = await inspect(o.files[0].data), n = r.pages[0].spots.filter(t => t.str === 'DRAFT').length;
+    return [n >= 8, `${n} stamps on page 1`, r.doc];
+  }],
+  ['watermark', 'image in the center', ['sample-3.pdf'], { type: 'image', layout: 'center', opacity: 0.4, scale: 0.4, img: { bytes: entry('photo-tall.png').bytes, kind: 'png' } }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages.every(p => p.image), 'image on every page: ' + r.pages.every(p => p.image), r.doc];
+  }],
+  ['crop', 'same area cut from all pages', ['sample-3.pdf'], { x: 0.1, y: 0.1, w: 0.5, h: 0.5, pages: null }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages.every(p => p.w === 298 && p.h === 421), `sizes ${r.pages.map(p => p.w + 'x' + p.h)}`, r.doc];
+  }],
+  ['crop', 'left half of a rotated page only', ['rotated.pdf'], { x: 0, y: 0, w: 0.5, h: 1, pages: [2] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages[1].w === 421 && r.pages[1].h === 595 && r.pages[0].w === 595, `sizes ${r.pages.map(p => p.w + 'x' + p.h)}`, r.doc];
+  }],
+  ['edit', 'text, box, circle, line and picture', ['sample-3.pdf'], { boxes: [
+    { page: 1, type: 'text', text: 'HELLO EDIT', size: 20, color: 'blue', x: 0.1, y: 0.15, w: 0.4, h: 0.05 },
+    { page: 1, type: 'rect', color: 'red', x: 0.5, y: 0.6, w: 0.3, h: 0.1 },
+    { page: 1, type: 'ellipse', color: 'red', fill: true, x: 0.1, y: 0.6, w: 0.2, h: 0.1 },
+    { page: 1, type: 'line', color: 'black', dir: 'down', x: 0.1, y: 0.75, w: 0.8, h: 0.1 },
+    { page: 2, type: 'image', img: { bytes: entry('photo-wide.jpg').bytes, kind: 'jpg' }, x: 0.2, y: 0.2, w: 0.5, h: 0.2 }] }, async o => {
+    const r = await inspect(o.files[0].data), s = r.pages[0].spots.find(t => t.str === 'HELLO EDIT');
+    return [!!s && Math.abs(s.fx - 0.1) < 0.01 && Math.abs(s.fy - 0.173) < 0.01 && r.pages[1].image && !r.pages[0].image,
+      s ? `text at x ${s.fx.toFixed(3)}, y ${s.fy.toFixed(3)}; picture on page 2: ${r.pages[1].image}` : 'text not found', r.doc];
+  }],
+  ['edit', 'text lands where placed on a rotated page', ['rotated.pdf'], { boxes: [{ page: 2, type: 'text', text: 'TURNED', size: 20, color: 'black', x: 0.1, y: 0.1, w: 0.3, h: 0.05 }] }, async o => {
+    const r = await inspect(o.files[0].data), s = r.pages[1].spots.find(t => t.str === 'TURNED');
+    return [!!s && Math.abs(s.fx - 0.1) < 0.01 && Math.abs(s.fy - 0.132) < 0.01, s ? `at x ${s.fx.toFixed(3)}, y ${s.fy.toFixed(3)} (expected 0.100, 0.132)` : 'not found', r.doc];
+  }],
+  ['sign', 'signature picture on page 3 only', ['sample-3.pdf'], { boxes: [{ page: 3, type: 'image', img: { bytes: entry('photo-tall.png').bytes, kind: 'png' }, x: 0.55, y: 0.75, w: 0.3, h: 0.1 }] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [eq(r.pages.map(p => p.image), [false, false, true]), 'pictures: ' + r.pages.map(p => p.image), r.doc];
+  }],
+  ['redact', 'marked page loses its text, others keep it', ['sample-3.pdf'], { scale: 1, boxes: [{ page: 2, x: 0, y: 0.3, w: 1, h: 0.4 }] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages.length === 3 && !r.pages[1].text.trim() && r.pages[1].image && r.labels[0] === 1 && r.labels[2] === 3 && r.pages.every(p => p.w === 595),
+      `text per page: ${r.pages.map(p => p.text.trim() ? 'yes' : 'none')}`, r.doc];
+  }],
+  ['redact', 'rotated page keeps its look', ['rotated.pdf'], { scale: 1, boxes: [{ page: 2, x: 0.1, y: 0.1, w: 0.2, h: 0.2 }] }, async o => {
+    const r = await inspect(o.files[0].data);
+    return [r.pages[1].w === 842 && r.pages[1].h === 595 && r.pages[1].rot === 0, `page 2: ${r.pages[1].w}x${r.pages[1].h}`, r.doc];
+  }],
+  ['compress', 'password-protected file → clear error', ['locked.pdf'], { quality: 0.6, scale: 1 }, null, /password-protected/],
+  ['watermark', 'damaged file → clear error', ['broken.pdf'], { type: 'text', layout: 'center', opacity: 0.3, text: 'X', size: 40, angle: 0, color: 'gray' }, null, /damaged/],
+  ['edit', 'characters the built-in font lacks → clear error', ['sample-3.pdf'], { boxes: [{ page: 1, type: 'text', text: '日本', size: 20, color: 'black', x: 0.1, y: 0.1, w: 0.3, h: 0.05 }] }, null, /built-in font/],
+  ['merge', 'password-protected file → clear error', ['sample-3.pdf', 'locked.pdf'], {}, null, /password-protected/],
+  ['split', 'damaged file → clear error', ['broken.pdf'], { mode: 'each' }, null, /damaged/],
+  ['pdf2img', 'password-protected file → clear error', ['locked.pdf'], { type: 'jpg', scale: 1 }, null, /password-protected/],
+  ['img2pdf', 'a PDF renamed to .jpg → clear error', [['sample-3.pdf', 'fake.jpg']], { size: 'fit', margin: 0 }, null, /isn't a JPG or PNG/],
+];
+
+async function main() {
+  const rows = document.getElementById('rows'), lines = [];
+  let pass = 0, total = 0;
+  const add = (tool, name, ok, detail, preview) => {
+    total++;
+    if (ok) pass++;
+    const tr = App.h('tr', null, App.h('td', { text: tool }), App.h('td', { text: name }),
+      App.h('td', { class: ok ? 'pass' : 'fail', text: ok ? 'PASS' : 'FAIL' }), App.h('td', { text: detail }), App.h('td', null, preview || ''));
+    rows.append(tr);
+    lines.push(`${ok ? 'PASS' : 'FAIL'}  ${tool.padEnd(9)} ${name}  — ${detail}`);
+  };
+  const t0 = performance.now();
+  for (const [toolId, name, files, opts, check, expectErr] of T) {
+    const tool = App.tool(toolId);
+    const entries = files.map(f => Array.isArray(f) ? Object.assign(entry(f[0]), { name: f[1] }) : entry(f));
+    try {
+      for (const lib of tool.libs) await App.need(lib);
+      const out = await tool.run(entries, opts, noProgress);
+      if (expectErr) { add(toolId, name, false, 'expected an error, got a file'); continue; }
+      const [ok, detail, thing] = await check(out);
+      let preview = null;
+      if (thing instanceof Blob) {
+        preview = App.h('img', { alt: '' });
+        const url = URL.createObjectURL(thing);
+        preview.onload = () => URL.revokeObjectURL(url);
+        preview.src = url;
+      } else if (thing) {
+        preview = await App.renderPage(thing, 1, 0.12);
+        thing.destroy();
+      }
+      add(toolId, name, ok, detail, preview);
+    } catch (e) {
+      const msg = App.friendly(e);
+      add(toolId, name, !!expectErr && expectErr.test(msg), msg);
+    }
+  }
+  // Range parser messages
+  const msgOf = fn => { try { fn(); return 'no error'; } catch (e) { return App.friendly(e); } };
+  const m1 = msgOf(() => App.parseRanges('5-2', 3)), m2 = msgOf(() => App.parseRanges('9', 3)), m3 = msgOf(() => App.parseRanges('abc', 3));
+  add('ranges', 'bad page ranges explain the problem', /backwards/.test(m1) && /past the end/.test(m2) && /not a page/.test(m3), [m1, m2, m3].join(' | '));
+  add('ranges', '"2-" means to the end', eq(App.rangePages(App.parseRanges('2-', 4)), [2, 3, 4]), App.rangePages(App.parseRanges('2-', 4)).join(','));
+  const html = App.tool('html2pdf').buildDoc('<h1>Hi</h1><script>alert(1)<\/script>', { paper: 'A4', orient: 'portrait', margin: 'normal' });
+  add('html2pdf', 'preview blocks network and sets the paper', /default-src 'none'/.test(html) && /size: A4 portrait/.test(html) && /<h1>Hi<\/h1>/.test(html), 'CSP + @page present');
+  add('page', 'no uncaught errors', errors.length === 0, errors.join(' | ') || 'none');
+
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  const mem = performance.memory ? ` JS memory in use: ${(performance.memory.usedJSHeapSize / 1048576).toFixed(0)} MB.` : '';
+  document.getElementById('sum').textContent = `${pass} / ${total} passed in ${secs} s.${mem}`;
+  document.getElementById('sum').className = pass === total ? 'pass' : 'fail';
+  document.getElementById('out').textContent = document.getElementById('sum').textContent + '\n' + lines.join('\n');
+}
+main();
+</script>
+</body>
+</html>
